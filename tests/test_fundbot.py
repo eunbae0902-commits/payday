@@ -196,3 +196,43 @@ def test_milestone_validation():
     with pytest.raises(ValueError):
         validate(Config(milestones=[10_000.0]))
     validate(Config())
+
+
+# --- 업비트 시세 수집 / 기간 백테스트 ---
+
+def test_fetch_hourly_paginates_backwards_and_clips_range():
+    from datetime import datetime, timedelta, timezone
+    from fundbot import upbit_data
+
+    base = datetime(2022, 1, 1, tzinfo=timezone.utc)
+    all_hours = [base + timedelta(hours=i) for i in range(500)]
+
+    class Resp:
+        def __init__(self, data): self.data = data
+        def raise_for_status(self): pass
+        def json(self): return self.data
+
+    class Session:
+        calls = 0
+        def get(self, url, params, timeout):
+            Session.calls += 1
+            to = datetime.strptime(params["to"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            older = [h for h in all_hours if h < to][-params["count"]:]
+            return Resp([{"candle_date_time_utc": h.strftime("%Y-%m-%dT%H:%M:%S"),
+                          "trade_price": 100 + all_hours.index(h)} for h in reversed(older)])
+
+    start, end = base + timedelta(hours=10), base + timedelta(hours=450)
+    rows = upbit_data.fetch_hourly("KRW-BTC", start, end, session=Session(), pause=0)
+    assert len(rows) == 440
+    assert rows[0] == (start.timestamp(), 110.0)
+    assert rows == sorted(rows)
+    assert Session.calls >= 3
+
+
+def test_backtest_period_uses_warmup_without_trading_and_reports_hold():
+    cfg = small_cfg()
+    rows = {i * 3600.0: {"BTC-USD": 100.0 + i} for i in range(60)}
+    res = backtest.run(cfg, rows, start_ts=20 * 3600.0, end_ts=50 * 3600.0)
+    assert math.isclose(res["buy_and_hold_pct"]["BTC-USD"], (149 / 120 - 1) * 100)
+    # 워밍업 덕분에 시작 시점에 바로 진입 가능
+    assert "BUY" in res["log"][0] and res["log"][0].startswith("1970-01-01 20:00")

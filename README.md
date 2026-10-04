@@ -65,6 +65,22 @@ python -m fundbot run --i-understand-the-risk
 
 서버나 NAS에서 상시 실행하는 것을 권장합니다. cron으로 돌릴 때는 `run --once`를 5분마다 실행하면 됩니다.
 
+### 업비트 실제 시세로 기간별 백테스트 (2022 하락장 / 2024 상승장)
+
+업비트 공개 시세 API는 인증 없이 쓸 수 있습니다. 대표님 PC에서 아래처럼 실행합니다.
+
+```bash
+# 1) 시세 받기 (지표 준비용 300시간이 자동으로 앞에 붙음, 종목당 약 1분)
+python -m fundbot fetch-upbit --start 2022-01-01 --end 2023-01-01 --out upbit_2022.csv
+python -m fundbot fetch-upbit --start 2024-01-01 --end 2025-01-01 --out upbit_2024.csv
+
+# 2) 원화 설정(70만 원 시작, 수수료 0.05%)으로 백테스트
+python -m fundbot --config config.upbit-backtest.toml backtest upbit_2022.csv --start 2022-01-01 --end 2023-01-01
+python -m fundbot --config config.upbit-backtest.toml backtest upbit_2024.csv --start 2024-01-01 --end 2025-01-01
+```
+
+결과의 `buy_and_hold_pct`는 같은 기간에 그냥 들고만 있었을 때의 수익률입니다. 봇의 `return_pct`와 나란히 비교하면 됩니다.
+
 ### 백테스트 / 확률 시뮬레이션
 
 ```bash

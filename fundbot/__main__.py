@@ -1,11 +1,13 @@
-"""CLI: python -m fundbot {run,status,backtest,odds,reset}"""
+"""CLI: python -m fundbot {run,status,backtest,fetch-upbit,odds,reset}"""
 from __future__ import annotations
 
 import argparse
 import sys
 import time
 
-from . import backtest, engine, odds
+from datetime import datetime, timezone
+
+from . import backtest, engine, odds, upbit_data
 from .broker import LiveBroker, PaperBroker
 from .config import load_config
 from .robinhood import RobinhoodCrypto
@@ -65,11 +67,24 @@ def cmd_reset(args) -> None:
 
 def cmd_backtest(args) -> None:
     cfg = load_config(args.config)
-    res = backtest.run(cfg, backtest.load_csv(args.csv))
+    res = backtest.run(cfg, backtest.load_csv(args.csv), _day(args.start), _day(args.end))
     for line in res.pop("log")[-20:]:
         print("  " + line)
     for k, v in res.items():
+        if isinstance(v, dict):
+            v = ", ".join(f"{s} {p:+.1f}%" for s, p in v.items())
         print(f"{k}: {v:,.2f}" if isinstance(v, float) else f"{k}: {v}")
+
+
+def _day(s: str | None) -> float | None:
+    return datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp() if s else None
+
+
+def cmd_fetch_upbit(args) -> None:
+    start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
+    end = datetime.fromisoformat(args.end).replace(tzinfo=timezone.utc)
+    n = upbit_data.write_csv(args.markets, start, end, args.out)
+    print(f"{args.out}: {n:,}개 시간봉 저장 ({', '.join(args.markets)}, 지표 준비용 300시간 포함)")
 
 
 def cmd_odds(args) -> None:
@@ -103,7 +118,16 @@ def main(argv: list[str] | None = None) -> None:
 
     b = sub.add_parser("backtest", help="CSV(timestamp,symbol,close) 백테스트")
     b.add_argument("csv")
+    b.add_argument("--start", help="매매 시작일 YYYY-MM-DD (이전 데이터는 지표 준비용)")
+    b.add_argument("--end", help="매매 종료일 YYYY-MM-DD (해당일 미포함)")
     b.set_defaults(func=cmd_backtest)
+
+    fu = sub.add_parser("fetch-upbit", help="업비트 과거 시간봉을 CSV로 저장")
+    fu.add_argument("--markets", nargs="+", default=["KRW-BTC", "KRW-ETH"])
+    fu.add_argument("--start", required=True, help="YYYY-MM-DD (UTC)")
+    fu.add_argument("--end", required=True, help="YYYY-MM-DD (UTC, 미포함)")
+    fu.add_argument("--out", required=True)
+    fu.set_defaults(func=cmd_fetch_upbit)
 
     o = sub.add_parser("odds", help="목표 달성 확률 시뮬레이션")
     o.add_argument("--ret", type=float, default=0.30, help="기대 연수익률")

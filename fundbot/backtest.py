@@ -26,15 +26,28 @@ def load_csv(path: str) -> dict[float, dict[str, float]]:
     return dict(sorted(rows.items()))
 
 
-def run(cfg: Config, rows: dict[float, dict[str, float]]) -> dict:
+def run(cfg: Config, rows: dict[float, dict[str, float]],
+        start_ts: float | None = None, end_ts: float | None = None) -> dict:
+    """start_ts 이전 데이터는 지표 준비(warm-up)에만 쓰고 매매하지 않는다."""
     half = cfg.spread_bps / 20_000
     state = new_state(cfg)
     eng = Engine(cfg, PaperBroker(), state)
     peak, mdd, eq, goal_ts = cfg.starting_capital, 0.0, cfg.starting_capital, None
+    first_px: dict[str, float] = {}
+    last_px: dict[str, float] = {}
     for ts, closes in rows.items():
+        if end_ts is not None and ts >= end_ts:
+            break
         quotes = {s: (c * (1 - half), c * (1 + half)) for s, c in closes.items() if s in cfg.quote_symbols}
         if set(quotes) != set(cfg.quote_symbols):
             continue
+        if start_ts is not None and ts < start_ts:
+            for s in cfg.symbols:
+                eng._record_bar(s, ts, closes[s])
+            continue
+        for s in cfg.symbols:
+            first_px.setdefault(s, closes[s])
+            last_px[s] = closes[s]
         eq = eng.tick(ts, quotes)
         peak = max(peak, eq)
         mdd = max(mdd, 1 - eq / peak)
@@ -42,14 +55,15 @@ def run(cfg: Config, rows: dict[float, dict[str, float]]) -> dict:
             goal_ts = ts
         if state["halted"]:
             break
-    trades = [l for l in state["log"] if " SELL " in f" {l} "]
-    wins = [l for l in trades if "PnL +" in l]
+    stats = state["stats"]
+    hold = {s: (last_px[s] / first_px[s] - 1) * 100 for s in first_px}
     return {
         "final_equity": eq,
         "return_pct": (eq / cfg.starting_capital - 1) * 100,
         "max_drawdown_pct": mdd * 100,
-        "trades": len(trades),
-        "win_rate_pct": (len(wins) / len(trades) * 100) if trades else 0.0,
+        "trades": stats["trades"],
+        "win_rate_pct": (stats["wins"] / stats["trades"] * 100) if stats["trades"] else 0.0,
+        "buy_and_hold_pct": hold,         # 같은 기간 그냥 들고 있었을 때 수익률
         "halted": state["halted"],
         "goal_reached_at": goal_ts,
         "milestones_hit": state["milestones_hit"],

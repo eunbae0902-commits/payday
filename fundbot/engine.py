@@ -25,6 +25,7 @@ def new_state(cfg: Config) -> dict:
         "vault_cost": 0.0,        # 장기 보유분 누적 매수금액
         "milestones_hit": [],
         "pending_lock": 0.0,      # 장기 보유분으로 옮길 대기 금액
+        "stats": {"trades": 0, "wins": 0},
         "log": [],
     }
 
@@ -84,6 +85,9 @@ class Engine:
         filled = self.broker.sell(self.state, sym, pos["qty"], bid)
         if filled:
             pnl = (bid - pos["entry"]) * filled
+            st = self.state.setdefault("stats", {"trades": 0, "wins": 0})
+            st["trades"] += 1
+            st["wins"] += pnl > 0
             self._log(ts, f"SELL {sym} {filled:.8f} @ {bid:,.2f} ({reason}) PnL {pnl:+,.2f}")
             del self.state["positions"][sym]
 

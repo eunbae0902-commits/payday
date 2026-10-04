@@ -1,0 +1,10 @@
+# 업비트 원화 시세 백테스트용 설정 (약 500달러 = 70만 원 기준)
+mode = "paper"
+symbols = ["KRW-BTC", "KRW-ETH"]
+vault_symbol = "KRW-BTC"
+starting_capital = 700000.0
+target_equity = 14000000.0
+milestones = [1400000.0, 3500000.0, 7000000.0]
+milestone_lock_pct = 0.30
+spread_bps = 10.0        # 업비트 원화 마켓 수수료 0.05% × 매수·매도
+state_dir = "state_backtest"
