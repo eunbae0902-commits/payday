@@ -32,8 +32,8 @@ def run(cfg: Config, rows: dict[float, dict[str, float]]) -> dict:
     eng = Engine(cfg, PaperBroker(), state)
     peak, mdd, eq, goal_ts = cfg.starting_capital, 0.0, cfg.starting_capital, None
     for ts, closes in rows.items():
-        quotes = {s: (c * (1 - half), c * (1 + half)) for s, c in closes.items() if s in cfg.symbols}
-        if set(quotes) != set(cfg.symbols):
+        quotes = {s: (c * (1 - half), c * (1 + half)) for s, c in closes.items() if s in cfg.quote_symbols}
+        if set(quotes) != set(cfg.quote_symbols):
             continue
         eq = eng.tick(ts, quotes)
         peak = max(peak, eq)
@@ -52,5 +52,7 @@ def run(cfg: Config, rows: dict[float, dict[str, float]]) -> dict:
         "win_rate_pct": (len(wins) / len(trades) * 100) if trades else 0.0,
         "halted": state["halted"],
         "goal_reached_at": goal_ts,
+        "milestones_hit": state["milestones_hit"],
+        "vault_cost": state["vault_cost"],
         "log": state["log"],
     }

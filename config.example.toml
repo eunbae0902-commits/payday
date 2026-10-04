@@ -15,3 +15,9 @@ max_position_pct = 0.60
 max_drawdown_halt = 0.30
 daily_loss_halt = 0.06
 spread_bps = 50.0
+
+# 단계별 수익 확정: 총자산이 각 단계를 넘으면 (단계 - 직전 단계) × 30%를 BTC 장기 보유로 이전.
+# 최종 단계($10,000)는 target_equity가 담당합니다.
+milestones = [1000.0, 2500.0, 5000.0]
+milestone_lock_pct = 0.30
+vault_symbol = "BTC-USD"

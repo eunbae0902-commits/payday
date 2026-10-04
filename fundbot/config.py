@@ -29,11 +29,22 @@ class Config:
     daily_loss_halt: float = 0.06     # 하루 -6%면 당일 신규진입 중단
     spread_bps: float = 50.0          # 모의/백테스트용 체결 비용(스프레드) 가정
 
+    # 단계별 수익 확정: 총자산이 각 단계에 닿으면 직전 단계 이후 수익의 일부를
+    # vault_symbol(장기 보유분)로 옮긴다. 장기 보유분은 봇이 절대 팔지 않는다.
+    milestones: list[float] = field(default_factory=lambda: [1_000.0, 2_500.0, 5_000.0])
+    milestone_lock_pct: float = 0.30
+    vault_symbol: str = "BTC-USD"
+
     state_dir: str = "state"
 
     # 환경변수에서만 읽는 비밀값 (파일에 저장 금지)
     api_key: str = ""
     private_key_b64: str = ""
+
+    @property
+    def quote_symbols(self) -> list[str]:
+        """시세가 필요한 종목: 매매 종목 + 장기 보유 종목."""
+        return list(dict.fromkeys([*self.symbols, self.vault_symbol]))
 
     @property
     def warmup_bars(self) -> int:
@@ -68,5 +79,10 @@ def validate(cfg: Config) -> None:
         raise ValueError("max_drawdown_halt는 0~50% 사이로 제한됩니다")
     if cfg.fast_ema >= cfg.slow_ema:
         raise ValueError("fast_ema < slow_ema 이어야 합니다")
+    if list(cfg.milestones) != sorted(cfg.milestones) or any(
+            m <= cfg.starting_capital or m >= cfg.target_equity for m in cfg.milestones):
+        raise ValueError("milestones는 오름차순이며 starting_capital과 target_equity 사이여야 합니다")
+    if not 0 <= cfg.milestone_lock_pct <= 1:
+        raise ValueError("milestone_lock_pct는 0~100% 사이여야 합니다")
     if cfg.mode == "live" and not (cfg.api_key and cfg.private_key_b64):
         raise ValueError("live 모드는 RH_API_KEY, RH_PRIVATE_KEY 환경변수가 필요합니다")

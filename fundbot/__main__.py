@@ -23,14 +23,14 @@ def cmd_run(args) -> None:
     if cfg.mode == "live":
         if not args.i_understand_the_risk:
             sys.exit("live 모드는 --i-understand-the-risk 플래그가 있어야 실행됩니다.")
-        broker = LiveBroker(client, cfg.symbols)
+        broker = LiveBroker(client, cfg.quote_symbols)
     else:
         broker = PaperBroker()
     state = engine.load_state(cfg)
     eng = engine.Engine(cfg, broker, state)
     while True:
         try:
-            eq = eng.tick(time.time(), _quotes(client, cfg.symbols))
+            eq = eng.tick(time.time(), _quotes(client, cfg.quote_symbols))
             engine.save_state(cfg, state)
             print(f"[{cfg.mode}] equity ${eq:,.2f} | 포지션 {list(state['positions'])} | halted={state['halted']}")
         except Exception as e:  # 네트워크 오류 등은 다음 tick에서 재시도
@@ -46,6 +46,9 @@ def cmd_status(args) -> None:
     print(f"모드={cfg.mode} 현금=${st['cash']:,.2f} 고점자산=${st['peak_equity']:,.2f} halted={st['halted']}")
     for sym, p in st["positions"].items():
         print(f"  {sym}: {p['qty']:.8f} @ {p['entry']:,.2f} stop {p['stop']:,.2f}")
+    for sym, qty in st["vault"].items():
+        print(f"  🔒 장기 보유 {sym}: {qty:.8f} (누적 매수 ${st['vault_cost']:,.2f})")
+    print(f"  돌파한 단계: {st['milestones_hit'] or '없음'}")
     for line in st["log"][-15:]:
         print("  " + line)
 
@@ -71,15 +74,17 @@ def cmd_backtest(args) -> None:
 
 def cmd_odds(args) -> None:
     cfg = load_config(args.config)
-    r = odds.goal_probability(cfg.starting_capital, cfg.target_equity, args.ret, args.vol,
-                              args.years, cfg.max_drawdown_halt)
-    print(f"가정: 연수익 {args.ret:.0%}, 연변동성 {args.vol:.0%}, 기간 {args.years}년, "
-          f"낙폭정지 {cfg.max_drawdown_halt:.0%}")
-    print(f"  목표 ${cfg.target_equity:,.0f} 도달 확률 : {r['p_goal']:.1%}")
-    print(f"  낙폭정지로 중단될 확률   : {r['p_drawdown_halt']:.1%}")
-    print(f"  기간 내 미도달(운용중)    : {r['p_still_running']:.1%}")
-    if r["median_years_to_goal"]:
-        print(f"  달성 시 중앙값 소요기간   : {r['median_years_to_goal']:.1f}년")
+    print(f"가정: 매매 연수익 {args.ret:.0%}/변동성 {args.vol:.0%}, 기간 {args.years}년, "
+          f"낙폭정지 {cfg.max_drawdown_halt:.0%}, BTC 장기보유 연수익 {args.btc_ret:.0%}/변동성 {args.btc_vol:.0%}")
+    for label, ms, pct in (("단계 이전 없음", (), 0.0),
+                           (f"단계 {[int(m) for m in cfg.milestones]} × {cfg.milestone_lock_pct:.0%} 이전",
+                            tuple(cfg.milestones), cfg.milestone_lock_pct)):
+        r = odds.goal_probability(cfg.starting_capital, cfg.target_equity, args.ret, args.vol,
+                                  args.years, cfg.max_drawdown_halt, milestones=ms, lock_pct=pct,
+                                  vault_return=args.btc_ret, vault_vol=args.btc_vol)
+        yrs = f"{r['median_years_to_goal']:.1f}년" if r["median_years_to_goal"] else "-"
+        print(f"  [{label}] 목표 도달 {r['p_goal']:.1%} | 원금 이상 {r['p_above_start']:.1%} | "
+              f"최종 총자산 중앙값 ${r['median_final']:,.0f} | 달성 중앙값 {yrs}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -104,6 +109,8 @@ def main(argv: list[str] | None = None) -> None:
     o.add_argument("--ret", type=float, default=0.30, help="기대 연수익률")
     o.add_argument("--vol", type=float, default=0.60, help="연변동성")
     o.add_argument("--years", type=float, default=5)
+    o.add_argument("--btc-ret", type=float, default=0.30, help="장기 보유 BTC 기대 연수익률")
+    o.add_argument("--btc-vol", type=float, default=0.55, help="장기 보유 BTC 연변동성")
     o.set_defaults(func=cmd_odds)
 
     args = ap.parse_args(argv)

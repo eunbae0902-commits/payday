@@ -55,8 +55,8 @@ class LiveBroker:
         state["cash"] = float(acct["buying_power"])
         held = self.client.holdings()
         for sym, pos in list(state["positions"].items()):
-            qty = held.get(sym.split("-")[0], 0.0)
-            if qty <= 0:
+            qty = held.get(sym.split("-")[0], 0.0) - state["vault"].get(sym, 0.0)
+            if qty <= 1e-12:
                 del state["positions"][sym]
             else:
                 pos["qty"] = qty
