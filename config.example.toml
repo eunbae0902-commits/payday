@@ -1,0 +1,17 @@
+# cp config.example.toml config.toml 후 수정. API 키는 절대 이 파일에 넣지 말고 환경변수로.
+mode = "paper"                 # 최소 4주 paper 검증 후에만 "live"
+symbols = ["BTC-USD", "ETH-USD"]
+starting_capital = 500.0
+target_equity = 10000.0
+
+fast_ema = 24
+slow_ema = 72
+regime_ema = 200
+atr_period = 14
+stop_atr_mult = 3.0
+
+risk_per_trade = 0.02
+max_position_pct = 0.60
+max_drawdown_halt = 0.30
+daily_loss_halt = 0.06
+spread_bps = 50.0
