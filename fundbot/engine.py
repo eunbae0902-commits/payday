@@ -60,21 +60,27 @@ def vault_value(state: dict, quotes: dict[str, tuple[float, float]]) -> float:
 class Engine:
     def __init__(self, cfg: Config, broker, state: dict):
         self.cfg, self.broker, self.state = cfg, broker, state
+        self._sig: dict[str, strategy.Signal | None] = {}
+        if state.get("bar_hours", cfg.bar_hours) != cfg.bar_hours:   # 봉 길이가 바뀌면 다시 수집
+            state["bars"], state["last_bar"] = {}, {}
+        state["bar_hours"] = cfg.bar_hours
 
     def _log(self, ts: float, msg: str) -> None:
         stamp = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d %H:%M")
         self.state["log"].append(f"{stamp} {msg}")
         self.state["log"] = self.state["log"][-500:]
 
-    def _record_bar(self, sym: str, ts: float, mid: float) -> None:
-        hour = int(ts // 3600)
+    def _record_bar(self, sym: str, ts: float, mid: float) -> bool:
+        """봉에 가격 반영. 새 봉이 시작됐으면 True."""
+        bucket = int(ts // (3600 * self.cfg.bar_hours))
         bars = self.state["bars"].setdefault(sym, [])
-        if self.state["last_bar"].get(sym) == hour and bars:
+        if self.state["last_bar"].get(sym) == bucket and bars:
             bars[-1] = mid
-        else:
-            bars.append(mid)
-            self.state["last_bar"][sym] = hour
+            return False
+        bars.append(mid)
+        self.state["last_bar"][sym] = bucket
         del bars[:-MAX_BARS]
+        return True
 
     def _sell_all(self, ts: float, quotes, reason: str) -> None:
         for sym in list(self.state["positions"]):
@@ -146,12 +152,26 @@ class Engine:
         st["day_start_equity"] -= spent
         self._log(ts, f"🔒 장기 보유 {sym} {filled:.8f} @ {ask:,.2f} (${spent:,.2f})")
 
-    def tick(self, ts: float, quotes: dict[str, tuple[float, float]]) -> float:
-        """한 번 운용하고 총자산(매매 자산 + 장기 보유분)을 반환."""
+    def tick(self, ts: float, quotes: dict[str, tuple[float, float]],
+             bar_complete: bool | None = None) -> float:
+        """한 번 운용하고 총자산(매매 자산 + 장기 보유분)을 반환.
+
+        추세 신호(진입·추세 이탈)는 봉이 완성될 때 한 번만 판단하고, 손절선은 매 tick 확인한다.
+        - 실거래(bar_complete=None): 새 봉의 첫 tick에서 직전까지 완성된 봉으로 판단
+        - 백테스트: 이 tick으로 봉이 완성되면 bar_complete=True를 넘겨 현재 봉까지 포함해 판단
+        """
         cfg, st = self.cfg, self.state
+        decide: dict[str, bool] = {}
         for sym in cfg.symbols:
             bid, ask = quotes[sym]
-            self._record_bar(sym, ts, (bid + ask) / 2)
+            new_bar = self._record_bar(sym, ts, (bid + ask) / 2)
+            bars = st["bars"][sym]
+            if bar_complete is None:
+                decide[sym], closed = new_bar, bars[:-1]
+            else:
+                decide[sym], closed = bar_complete, bars
+            if decide[sym] or sym not in self._sig:
+                self._sig[sym] = strategy.evaluate(closed, cfg)
 
         self.broker.sync(st)
         eq = equity(st, quotes)
@@ -188,18 +208,17 @@ class Engine:
 
         for sym in cfg.symbols:
             bid, ask = quotes[sym]
-            sig = strategy.evaluate(st["bars"].get(sym, []), cfg)
-            if sig is None:
-                continue
+            sig = self._sig.get(sym)
             pos = st["positions"].get(sym)
             if pos:
                 pos["peak"] = max(pos["peak"], bid)
-                pos["stop"] = max(pos["stop"], pos["peak"] - cfg.stop_atr_mult * sig.atr)
+                if sig:
+                    pos["stop"] = max(pos["stop"], pos["peak"] - cfg.stop_atr_mult * sig.atr)
                 if bid <= pos["stop"]:
                     self._exit(sym, ts, bid, "트레일링 스톱")
-                elif sig.trend_down:
+                elif sig and decide[sym] and sig.trend_down:
                     self._exit(sym, ts, bid, "추세 이탈")
-            elif sig.trend_up and not entry_blocked:
+            elif sig and decide[sym] and sig.trend_up and not entry_blocked:
                 qty = strategy.position_size(eq, st["cash"], ask, sig.atr, cfg)
                 filled = self.broker.buy(st, sym, qty, ask)
                 if filled:

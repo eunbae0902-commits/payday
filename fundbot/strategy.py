@@ -17,6 +17,7 @@ class Signal:
 def evaluate(closes: list[float], cfg: Config) -> Signal | None:
     if len(closes) < cfg.warmup_bars:
         return None
+    closes = closes[-max(3 * cfg.regime_ema, cfg.warmup_bars):]
     fast, slow = ema(closes, cfg.fast_ema), ema(closes, cfg.slow_ema)
     regime = ema(closes, cfg.regime_ema)
     price = closes[-1]

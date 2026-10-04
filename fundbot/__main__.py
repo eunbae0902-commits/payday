@@ -1,7 +1,8 @@
-"""CLI: python -m fundbot {run,status,backtest,fetch-upbit,odds,reset}"""
+"""CLI: python -m fundbot {run,status,backtest,compare,fetch-upbit,odds,reset}"""
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 import time
 
@@ -76,6 +77,27 @@ def cmd_backtest(args) -> None:
         print(f"{k}: {v:,.2f}" if isinstance(v, float) else f"{k}: {v}")
 
 
+def cmd_compare(args) -> None:
+    """같은 데이터·같은 설정에서 판단 단위(봉 길이)만 바꿔 비교."""
+    base = load_config(args.config)
+    rows = backtest.load_csv(args.csv)
+    start, end = _day(args.start), _day(args.end)
+    print(f"{'판단 단위':<10}{'수익률':>9}{'최대낙폭':>9}{'매매횟수':>8}{'승률':>8}  정지/단계")
+    hold = None
+    for h in args.bar_hours:
+        cfg = dataclasses.replace(base, bar_hours=h)
+        res = backtest.run(cfg, rows, start, end)
+        hold = res["buy_and_hold_pct"]
+        label = {1: "1시간봉", 4: "4시간봉", 24: "일봉"}.get(h, f"{h}시간봉")
+        extra = res["halted"] or "-"
+        if res["milestones_hit"]:
+            extra += f" / 단계 {len(res['milestones_hit'])}개 돌파"
+        print(f"{label:<10}{res['return_pct']:>+8.1f}%{-res['max_drawdown_pct']:>+8.1f}%"
+              f"{res['trades']:>8}{res['win_rate_pct']:>7.0f}%  {extra}")
+    if hold:
+        print("단순 보유: " + ", ".join(f"{s} {p:+.1f}%" for s, p in hold.items()))
+
+
 def _day(s: str | None) -> float | None:
     return datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp() if s else None
 
@@ -83,8 +105,8 @@ def _day(s: str | None) -> float | None:
 def cmd_fetch_upbit(args) -> None:
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
     end = datetime.fromisoformat(args.end).replace(tzinfo=timezone.utc)
-    n = upbit_data.write_csv(args.markets, start, end, args.out)
-    print(f"{args.out}: {n:,}개 시간봉 저장 ({', '.join(args.markets)}, 지표 준비용 300시간 포함)")
+    n = upbit_data.write_csv(args.markets, start, end, args.out, warmup_hours=args.warmup_days * 24)
+    print(f"{args.out}: {n:,}개 시간봉 저장 ({', '.join(args.markets)}, 지표 준비용 {args.warmup_days}일 포함)")
 
 
 def cmd_odds(args) -> None:
@@ -122,11 +144,20 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--end", help="매매 종료일 YYYY-MM-DD (해당일 미포함)")
     b.set_defaults(func=cmd_backtest)
 
+    c = sub.add_parser("compare", help="판단 단위(1h/4h/1d)별 백테스트 비교")
+    c.add_argument("csv")
+    c.add_argument("--start")
+    c.add_argument("--end")
+    c.add_argument("--bar-hours", type=int, nargs="+", default=[1, 4, 24])
+    c.set_defaults(func=cmd_compare)
+
     fu = sub.add_parser("fetch-upbit", help="업비트 과거 시간봉을 CSV로 저장")
     fu.add_argument("--markets", nargs="+", default=["KRW-BTC", "KRW-ETH"])
     fu.add_argument("--start", required=True, help="YYYY-MM-DD (UTC)")
     fu.add_argument("--end", required=True, help="YYYY-MM-DD (UTC, 미포함)")
     fu.add_argument("--out", required=True)
+    fu.add_argument("--warmup-days", type=int, default=220,
+                    help="시작일 이전 지표 준비 기간 (일봉 EMA200에 필요한 약 210일 이상 권장)")
     fu.set_defaults(func=cmd_fetch_upbit)
 
     o = sub.add_parser("odds", help="목표 달성 확률 시뮬레이션")

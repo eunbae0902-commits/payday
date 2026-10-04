@@ -1,5 +1,6 @@
 # 업비트 원화 시세 백테스트용 설정 (약 500달러 = 70만 원 기준)
 mode = "paper"
+bar_hours = 24          # 1 = 1시간봉, 4 = 4시간봉, 24 = 일봉
 symbols = ["KRW-BTC", "KRW-ETH"]
 vault_symbol = "KRW-BTC"
 starting_capital = 700000.0

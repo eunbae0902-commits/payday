@@ -15,7 +15,9 @@ class Config:
     starting_capital: float = 500.0
     target_equity: float = 10_000.0
 
-    # 전략 (시간봉 종가 기준)
+    # 전략. 지표 기간은 '봉 개수' 단위이며 bar_hours가 봉 하나의 길이(시간).
+    # 1 = 1시간봉, 4 = 4시간봉, 24 = 일봉(UTC 0시 = 한국 오전 9시 기준, 업비트 일봉과 동일)
+    bar_hours: int = 1
     fast_ema: int = 24
     slow_ema: int = 72
     regime_ema: int = 200
@@ -77,6 +79,8 @@ def validate(cfg: Config) -> None:
         raise ValueError("max_position_pct는 0~100% 사이여야 합니다")
     if not 0 < cfg.max_drawdown_halt <= 0.5:
         raise ValueError("max_drawdown_halt는 0~50% 사이로 제한됩니다")
+    if cfg.bar_hours not in (1, 2, 4, 6, 12, 24):
+        raise ValueError("bar_hours는 1, 2, 4, 6, 12, 24 중 하나여야 합니다")
     if cfg.fast_ema >= cfg.slow_ema:
         raise ValueError("fast_ema < slow_ema 이어야 합니다")
     if list(cfg.milestones) != sorted(cfg.milestones) or any(

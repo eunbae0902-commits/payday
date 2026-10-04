@@ -1,4 +1,8 @@
-"""과거 시간봉 CSV로 동일 엔진을 돌려 성과를 검증."""
+"""과거 시간봉 CSV로 동일 엔진을 돌려 성과를 검증.
+
+CSV의 timestamp는 시간봉의 '시작' 시각(업비트 candle_date_time_utc와 동일)이고 close는 그 봉의 종가.
+4시간봉·일봉 설정이어도 손절선은 매 시간봉마다 확인한다.
+"""
 from __future__ import annotations
 
 import csv
@@ -48,7 +52,8 @@ def run(cfg: Config, rows: dict[float, dict[str, float]],
         for s in cfg.symbols:
             first_px.setdefault(s, closes[s])
             last_px[s] = closes[s]
-        eq = eng.tick(ts, quotes)
+        bar_complete = int(ts + 3600) % (3600 * cfg.bar_hours) == 0
+        eq = eng.tick(ts, quotes, bar_complete=bar_complete)
         peak = max(peak, eq)
         mdd = max(mdd, 1 - eq / peak)
         if state["halted"] == "GOAL" and goal_ts is None:

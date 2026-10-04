@@ -236,3 +236,60 @@ def test_backtest_period_uses_warmup_without_trading_and_reports_hold():
     assert math.isclose(res["buy_and_hold_pct"]["BTC-USD"], (149 / 120 - 1) * 100)
     # 워밍업 덕분에 시작 시점에 바로 진입 가능
     assert "BUY" in res["log"][0] and res["log"][0].startswith("1970-01-01 20:00")
+
+
+# --- 판단 단위(봉 길이) ---
+
+def test_four_hour_bars_decide_once_per_bar():
+    cfg = small_cfg(bar_hours=4)
+    st = new_state(cfg)
+    eng = Engine(cfg, PaperBroker(), st)
+    for i in range(80):
+        eng.tick(i * 3600, quotes(100 + i))
+    assert len(st["bars"]["BTC-USD"]) == 20
+    buy_hours = [int(l[11:13]) for l in st["log"] if "BUY" in l]
+    assert buy_hours and all(h % 4 == 0 for h in buy_hours)   # 새 4시간봉 시작 시에만 진입
+
+
+def test_daily_bars_ignore_intraday_noise_but_stop_still_fires():
+    cfg = small_cfg(bar_hours=24)
+    st = new_state(cfg)
+    eng = Engine(cfg, PaperBroker(), st)
+    t = 0
+    for d in range(15):                      # 15일 상승 → 진입
+        for h in range(24):
+            eng.tick(t, quotes(100 + d + h / 24)); t += 3600
+    assert "BTC-USD" in st["positions"]
+    stop = st["positions"]["BTC-USD"]["stop"]
+    eng.tick(t + 600, quotes(stop * 0.99))   # 같은 날 안에서 손절선 이탈
+    assert "BTC-USD" not in st["positions"]
+    assert "트레일링 스톱" in st["log"][-1]
+
+
+def test_backtest_marks_bar_complete_on_last_hour_of_bar():
+    cfg = small_cfg(bar_hours=4)
+    rows = {i * 3600.0: {"BTC-USD": 100.0 + i} for i in range(80)}
+    res = backtest.run(cfg, rows)
+    buy_hours = [int(l[11:13]) for l in res["log"] if "BUY" in l]
+    assert buy_hours and all(h % 4 == 3 for h in buy_hours)   # 4시간봉 마지막 시간봉 종가에 판단
+
+
+def test_changing_bar_hours_resets_collected_bars():
+    st = new_state(small_cfg())
+    st["bars"] = {"BTC-USD": [1.0, 2.0]}
+    st["bar_hours"] = 1
+    Engine(small_cfg(bar_hours=4), PaperBroker(), st)
+    assert st["bars"] == {} and st["bar_hours"] == 4
+
+
+def test_compare_cli_runs(tmp_path, capsys):
+    from fundbot.__main__ import main
+    f = tmp_path / "px.csv"
+    f.write_text("\n".join(["timestamp,symbol,close"] +
+                           [f"{i*3600},BTC-USD,{100 + i * 0.1}" for i in range(24 * 40)]))
+    cfgf = tmp_path / "c.toml"
+    cfgf.write_text('symbols=["BTC-USD"]\nfast_ema=3\nslow_ema=6\nregime_ema=10\natr_period=3\n'
+                    'milestones=[]\n')
+    main(["--config", str(cfgf), "compare", str(f)])
+    out = capsys.readouterr().out
+    assert "1시간봉" in out and "4시간봉" in out and "일봉" in out and "단순 보유" in out

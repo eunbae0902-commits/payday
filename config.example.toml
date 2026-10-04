@@ -1,5 +1,6 @@
 # cp config.example.toml config.toml 후 수정. API 키는 절대 이 파일에 넣지 말고 환경변수로.
 mode = "paper"                 # 최소 4주 paper 검증 후에만 "live"
+bar_hours = 1                  # 판단 단위: 1 = 1시간봉, 4 = 4시간봉, 24 = 일봉
 symbols = ["BTC-USD", "ETH-USD"]
 starting_capital = 500.0
 target_equity = 10000.0
